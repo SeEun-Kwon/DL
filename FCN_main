@@ -3,8 +3,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from dask.array import equal
-
 from FCN_network import *
 from FCN_function import *
 # from FCN_function_bs import load_semantic_seg_data
@@ -55,25 +53,24 @@ test_n = len(test)
 
 batch_size = 32
 lr = 0.001
-iter = 250000
+iter = 200000
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = FCN_8().to(device)
-# model_load = 40000
-# model.load_state_dict(torch.load(f'/home/aivs/anaconda3/envs/kse/Segmentation/model/{model_load}.pt'))
+model_load = 190000
+model.load_state_dict(torch.load(f'/home/aivs/anaconda3/envs/kse/Segmentation/model/{model_load}.pt'))
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=lr)
 
 start_time = 0
 # train
-for i in range(iter):
+for i in range(190001, iter + 1):
     # learning rate scheduling
-    if (i % 25000 == 0) & (i != 0):
+    if (i % 50000 == 0) and (i != 0):
         optimizer.param_groups[0]['lr'] /= 2
 
     model.train()
     optimizer.zero_grad()
-
 
     batch_img, batch_gts = mini_batch(train_n, batch_size, train, train_gts)
     batch_img, batch_gts = torch.from_numpy(batch_img), torch.from_numpy(batch_gts)
@@ -86,15 +83,22 @@ for i in range(iter):
     optimizer.step()
 
     f1 = open('FCN8_loss.txt', 'a+')
-    f2 = open('FCN8_pixel_accuracy.txt', 'a+')
-    f3 = open('FCN8_mIoU.txt', 'a+')
+    f2 = open('FCN8 pixel accuracy and mIoU.txt', 'a+')
 
+    # test loss
     if i % 100 == 0:
-        f1.write(f'{i}\t{loss:.5f}\n')
+        model.eval()
+        with torch.no_grad():
+            batch_img, batch_gts = mini_batch(test_n, batch_size, test, test_gts)
+            batch_img, batch_gts = torch.from_numpy(batch_img).to(device), torch.from_numpy(batch_gts).to(device)
+
+            output = model(batch_img)  # output.shape = (32, 21, 256, 256)
+            test_loss = criterion(output, batch_gts)
+        f1.write(f'{i}\t{loss:.5f}\t{test_loss:.5f}\n')
         # print(f'{i}: {loss.item():.4f}')
 
     # test and save model
-    if (i % 10000 == 0) and (i != 0):
+    if (i % 10000 == 0) and (i != 190000):
         if i != 0:
             torch.save(model.state_dict(), f'model/{i}.pt')
         model.eval()
@@ -112,6 +116,7 @@ for i in range(iter):
                 test_output = model(test_img)
                 test_output = np.squeeze(test_output.cpu().numpy())
                 test_output = np.transpose(test_output, (1, 2, 0))   # (256, 256, 21)
+
                 # class만 저장
                 test_gt = np.argmax(test_gts[j, :, :, :], axis=-1)      # (256, 256)
                 pred = np.argmax(test_output, axis=-1)                  # (256, 256)
@@ -122,25 +127,25 @@ for i in range(iter):
                 comparison = np.zeros(shape=(2, 256 * 256), dtype=np.uint8)
                 comparison[0], comparison[1] = pred.reshape(-1), test_gt.reshape(-1)
                 comparison = np.transpose(comparison, (1, 0))
+                score = np.zeros(shape=test_n, dtype=np.float32)
                 for p in range(21):
                     for q in range(21):
                         count = np.sum(np.all(comparison == (p, q), axis=-1))
                         confusion_mtx[p, q] = count
                         total_c_m[p, q] += count
-                        temp=0
                         if p == q:
                             pixel_accuracy += count
                 total_pixel_accuracy += pixel_accuracy
                 pixel_accuracy = pixel_accuracy / (256 * 256) * 100
 
                 count, single_mIoU = 0, 0
+                score = np.zeros(shape=21, dtype=np.float32)
                 for k in range(21):
-                    union = sum(confusion_mtx[k, :]) + sum(confusion_mtx[:, k]) - confusion_mtx[k, k]
-                    temp=0
-                    if union != 0:
-                        single_mIoU += (confusion_mtx[k, k] / union)
+                    if sum(confusion_mtx[:, k]) != 0:
                         count += 1
-                        temp = 0
+                        union = sum(confusion_mtx[k, :]) + sum(confusion_mtx[:, k]) - confusion_mtx[k, k]
+                        single_mIoU += (confusion_mtx[k, k] / union)
+                        score[k] = confusion_mtx[k, k] / union
                 single_mIoU /= count
 
                 # saving predicted image
@@ -156,8 +161,7 @@ for i in range(iter):
                 count += 1
         total_pixel_accuracy /= (256 * 256 * test_n)
         total_mIoU /= count
-        f2.write(f'{i}\t{total_pixel_accuracy:.4}\n')
-        f3.write(f'{i}\t{total_mIoU:.4}\n')
+        f2.write(f'{i}\t{total_pixel_accuracy:.4}\t{total_mIoU:.4}\n')
 
         test_time = time.time()
         elapsed_time = (test_time - start_time) / 60
@@ -165,6 +169,5 @@ for i in range(iter):
         print(f'step: {i}\t||  pixel accuracy: {total_pixel_accuracy:.4f},\tmIoU: {total_mIoU:.4},\tlr: {learning_rate:.10},\ttime: {elapsed_time:.1}')
     f1.close()
     f2.close()
-    f3.close()
 
 
