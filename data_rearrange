@@ -1,0 +1,13 @@
+import shutil
+import os
+
+path = '/home/aivs/바탕화면/hdd/dataset/VOC2012/ImageSets/Segmentation/val.txt'
+gtpath = '/home/aivs/바탕화면/hdd/dataset/VOC2012/SegmentationClass'
+newpath = '/home/aivs/바탕화면/hdd/dataset/VOC2012/test_gt'
+
+f = open(path, 'r')
+
+for line in f.readlines():
+    line = line.strip() + '.png'
+    shutil.copyfile(os.path.join(gtpath, line), os.path.join(newpath, line))
+
