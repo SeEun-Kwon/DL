@@ -12,23 +12,23 @@ import cv2
 
 # data load
 print('Datasets loading...')
-path = '/home/aivs/바탕화면/hdd/BS/VOC_dataset'
+path = '/home/aivs/바탕화면/hdd/dataset/VOC2012'
 
 while 1:
     choice = input('from (1) scratch or (2) npy: ')
     if choice == '1':
         train, test, train_gts, test_gts = data_load(path)
-        np.save('/home/aivs/바탕화면/hdd/KSE/npy/voc/train.npy', train)
-        np.save('/home/aivs/바탕화면/hdd/KSE/npy/voc/test.npy', test)
-        np.save('/home/aivs/바탕화면/hdd/KSE/npy/voc/train_gts.npy', train_gts)
-        np.save('/home/aivs/바탕화면/hdd/KSE/npy/voc/test_gts.npy', test_gts)
+        np.save('/home/aivs/바탕화면/hdd/hdd/kse/npy/train.npy', train)
+        np.save('/home/aivs/바탕화면/hdd/hdd/kse/npy/test.npy', test)
+        np.save('/home/aivs/바탕화면/hdd/hdd/kse/npy/train_gts.npy', train_gts)
+        np.save('/home/aivs/바탕화면/hdd/hdd/kse/npy/test_gts.npy', test_gts)
         print('data save finished')
         break
     elif choice == '2':
-        train = np.load('/home/aivs/바탕화면/hdd/KSE/npy/voc' + '/train.npy')
-        test = np.load('/home/aivs/바탕화면/hdd/KSE/npy/voc' + '/test.npy')
-        train_gts = np.load('/home/aivs/바탕화면/hdd/KSE/npy/voc' + '/train_gts.npy')
-        test_gts = np.load('/home/aivs/바탕화면/hdd/KSE/npy/voc' + '/test_gts.npy')
+        train = np.load('/home/aivs/바탕화면/hdd/hdd/kse/npy' + '/train.npy')
+        test = np.load('/home/aivs/바탕화면/hdd/hdd/kse/npy' + '/test.npy')
+        train_gts = np.load('/home/aivs/바탕화면/hdd/hdd/kse/npy' + '/train_gts.npy')
+        test_gts = np.load('/home/aivs/바탕화면/hdd/hdd/kse/npy' + '/test_gts.npy')
         print('Datasets loading completed')
         break
     else:
@@ -43,8 +43,8 @@ VOC_COLORMAP = np.array([[0, 0, 0], [0, 0, 128], [0, 128, 0], [0, 128, 128], [12
                 [128, 0, 64], [128, 0, 192], [128, 128, 64], [128, 128, 192], [0, 64, 0], [0, 64, 128],
                 [0, 192, 0], [0, 192, 128], [128, 64, 0]])
 
-train_names = os.listdir(path + '/train/train_gt')
-test_names = os.listdir(path + '/test/test_img')
+train_names = os.listdir(path + '/train')
+test_names = os.listdir(path + '/test')
 class_num = len(VOC_CLASSES)
 train_n = len(train)
 test_n = len(test)
@@ -52,57 +52,65 @@ test_n = len(test)
 batch_size = 32
 lr = 0.001
 iter = 200000
+start = 1
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = UNet().to(device)
-# model_load = 190000
-# model.load_state_dict(torch.load(f'/home/aivs/anaconda3/envs/kse/Segmentation/model/{model_load}.pt'))
+# model_load = 10000
+# model.load_state_dict(torch.load(f'model/{model_load}.pt'))
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=lr)
+optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-8)
+start_time = time.time()
 
-start_time = 0
-# train
-for i in range(iter + 1):
-    # learning rate scheduling
-    if (i % 50000 == 0) and (i != 0):
-        optimizer.param_groups[0]['lr'] /= 2
 
+
+print('train start')
+
+# train # tensorbord에 결과 저장 가능
+for i in range(start, iter + 1):
+    if i == 25000:
+        optimizer.param_groups[0]['lr'] = 0.0005
+    elif i == 50000:
+        optimizer.param_groups[0]['lr'] = 0.0001
+    elif i == 75000:
+        optimizer.param_groups[0]['lr'] = 0.00005
+    elif i == 100000:
+        optimizer.param_groups[0]['lr'] = 0.00001
+    elif i == 150000:
+        optimizer.param_groups[0]['lr'] = 0.000005
+    elif i == 175000:
+        optimizer.param_groups[0]['lr'] = 0.000001
+
+    f1 = open('result/UNet loss.txt', 'a+')
+    f2 = open('result/UNet pixel accuracy and mIoU_3.txt', 'a+')
     model.train()
+
     optimizer.zero_grad()
-
     batch_img, batch_gts = mini_batch(train_n, batch_size, train, train_gts)
-    batch_img, batch_gts = torch.from_numpy(batch_img), torch.from_numpy(batch_gts)
+    batch_img, batch_gts = torch.from_numpy(batch_img), torch.LongTensor(torch.from_numpy(batch_gts))
     batch_img, batch_gts = batch_img.to(device), batch_gts.to(device)
-    # batch_img: (32, 3, 252, 252), batch_gt: (32, 1, 252, 252)
-    output = model(batch_img)    # output.shape = (32, 21, 128, 128)
-
+    output = model(batch_img)
     loss = criterion(output, batch_gts)
     loss.backward()
     optimizer.step()
 
-    f1 = open('UNet loss.txt', 'a+')
-    f2 = open('UNet pixel accuracy and mIoU.txt', 'a+')
-
-    # test loss
-    if i % 100 == 0:
+    if i % 500 == 0:
         model.eval()
         with torch.no_grad():
             batch_img, batch_gts = mini_batch(test_n, batch_size, test, test_gts)
             batch_img, batch_gts = torch.from_numpy(batch_img).to(device), torch.from_numpy(batch_gts).to(device)
-
-            output = model(batch_img)  # output.shape = (32, 21, 128, 128)
+            output = model(batch_img)
             test_loss = criterion(output, batch_gts)
-        f1.write(f'{i}\t{loss:.5f}\t{test_loss:.5f}\n')
-        # print(f'{i}: {loss.item():.4f}')
+        f1.write(f'{i}\t{loss:.6f}\t{test_loss:.6f}\t{optimizer.param_groups[0]["lr"]:.10f}\n')
+
 
     # test and save model
-    if (i % 10000 == 0) and (i != 0):
-        if i != 0:
-            torch.save(model.state_dict(), f'model/{i}.pt')
+    if i % 10000 == 0:
+        torch.save(model.state_dict(), f'model/{i}.pt')
         model.eval()
 
         #initialize
-        total_pixel_accuracy, total_mIoU = 0, 0
+        total_mIoU = 0
         total_c_m = np.zeros(shape=(21, 21), dtype=np.uint32)
 
         with torch.no_grad():
@@ -113,57 +121,54 @@ for i in range(iter + 1):
 
                 test_output = model(test_img)
                 test_output = np.squeeze(test_output.cpu().numpy())
-                test_output = np.transpose(test_output, (1, 2, 0))   # (128, 128, 21)
+                test_output = np.transpose(test_output, (1, 2, 0))
 
                 # class만 저장
-                test_gt = np.argmax(test_gts[j, :, :, :], axis=-1)      # (128, 128)
-                pred = np.argmax(test_output, axis=-1)                  # (128, 128)
+                test_gt = np.argmax(test_gts[j, :, :, :], axis=-1)
+                pred = np.argmax(test_output, axis=-1)
 
                 # accuracy
                 pixel_accuracy, count = 0, 0
                 confusion_mtx = np.zeros(shape=(21, 21), dtype=np.uint32)       # (pred, gt)
-                comparison = np.zeros(shape=(2, 128 * 128), dtype=np.uint8)
+                comparison = np.zeros(shape=(2, 256*256), dtype=np.uint8)
                 comparison[0], comparison[1] = pred.reshape(-1), test_gt.reshape(-1)
                 comparison = np.transpose(comparison, (1, 0))
-                score = np.zeros(shape=test_n, dtype=np.float32)
                 for p in range(21):
                     for q in range(21):
-                        count = np.sum(np.all(comparison == (p, q), axis=-1))
+                        count = np.sum(np.all(comparison == (p, q), axis=1))
                         confusion_mtx[p, q] = count
                         total_c_m[p, q] += count
                         if p == q:
                             pixel_accuracy += count
-                total_pixel_accuracy += pixel_accuracy
-                pixel_accuracy = pixel_accuracy / (128 * 128) * 100
+                pixel_accuracy = pixel_accuracy / (256 * 256)
 
-                count, single_mIoU = 0, 0
-                score = np.zeros(shape=21, dtype=np.float32)
+                count, IoU_sum = 0, 0.
                 for k in range(21):
-                    if sum(confusion_mtx[:, k]) != 0:
+                    union = sum(confusion_mtx[k, :]) + sum(confusion_mtx[:, k]) - confusion_mtx[k, k]
+                    if union != 0:
                         count += 1
-                        union = sum(confusion_mtx[k, :]) + sum(confusion_mtx[:, k]) - confusion_mtx[k, k]
-                        single_mIoU += (confusion_mtx[k, k] / union)
-                        score[k] = confusion_mtx[k, k] / union
-                single_mIoU /= count
+                        IoU_sum += (confusion_mtx[k, k] / union)  # 각각의 class에 대한 IoU
+                mIoU = IoU_sum / count
 
                 # saving predicted image
-                result_img = index_to_rgb(pred)    # index를 rgb로 변환하여 result image 생성, (128, 128, 3)
-                os.makedirs(f'/home/aivs/바탕화면/hdd/KSE/FCN_output/{i}', exist_ok=True)
-                cv2.imwrite(f'/home/aivs/바탕화면/hdd/KSE/FCN_output/{i}/{test_names[j][:-4]}({pixel_accuracy:.4},{single_mIoU:.4}).jpg', result_img)
+                result_img = index_to_color(pred)    # index를 rgb로 변환하여 result image 생성, (128, 128, 3)
+                os.makedirs(f'/home/aivs/바탕화면/hdd/kse/output/{i}', exist_ok=True)
+                cv2.imwrite(f'/home/aivs/바탕화면/hdd/kse/output/{i}/{test_names[j][:-4]}({pixel_accuracy:.4},{mIoU:.4}).jpg', result_img)
 
-        count = 0
-        for j in range(class_num):
+        total_pixel_accuracy =0
+        for j in range(21):
             total_img_union = sum(total_c_m[j, :]) + sum(total_c_m[:, j]) - total_c_m[j, j]
-            if total_img_union != 0:
-                total_mIoU += (total_c_m[j, j] / total_img_union)
-                count += 1
-        total_pixel_accuracy /= (128 * 128 * test_n)
-        total_mIoU /= count
+            total_mIoU += (total_c_m[j, j] / total_img_union)
+            total_pixel_accuracy += total_c_m[j, j]
+
+        total_pixel_accuracy /= (256 * 256 * test_n)
+        total_mIoU /= 21
         f2.write(f'{i}\t{total_pixel_accuracy:.4}\t{total_mIoU:.4}\n')
 
         test_time = time.time()
-        elapsed_time = (test_time - start_time) / 60
+        elapsed_time = (test_time - start_time) / 3600
         learning_rate = optimizer.param_groups[0]['lr']
-        print(f'step: {i}\t||  pixel accuracy: {total_pixel_accuracy:.4f},\tmIoU: {total_mIoU:.4},\tlr: {learning_rate:.10},\ttime: {elapsed_time:.1}')
+        print(f'step: {i}\t||  pixel accuracy: {total_pixel_accuracy:.4f},\tmIoU: {total_mIoU:.4f},\tlr: {learning_rate:.10f},\ttime: {elapsed_time:.1f}')
+
     f1.close()
     f2.close()
